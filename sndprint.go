@@ -128,13 +128,21 @@ func hashes(path string) []uint32 {
 		prevEnergies = energies
 
 		// Slide window forward
-		if _, err := io.ReadFull(br, b); err != nil {
-			if err == io.EOF || err == io.ErrUnexpectedEOF {
-				// XXX we shouldn't drop the remainder of the file
-				// under the table
-				break
+		if n, err := io.ReadFull(br, b); err != nil {
+			if err == io.EOF {
+				if n == 0 {
+					break
+				}
+			} else if err == io.ErrUnexpectedEOF {
+				if n == 0 {
+					break
+				}
+				for i := n; i < len(b); i++ {
+					b[i] = 0
+				}
+			} else {
+				panic(err)
 			}
-			log.Fatal(err)
 		}
 		copy(samples, samples[step:])
 		for i := 0; i < len(b)-2; i += 2 {
