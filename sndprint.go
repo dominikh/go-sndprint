@@ -1,8 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"math"
 	"math/bits"
@@ -68,36 +69,37 @@ func init() {
 }
 
 func hashes(path string) []uint32 {
-	// OPT(dh): of course we could stream the data
 	f, err := os.Open(path)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer f.Close()
-	data, err := ioutil.ReadAll(f)
-	if err != nil {
+	br := bufio.NewReader(f)
+
+	// Read initial set of samples
+	b := make([]byte, windowSize*depth)
+	if _, err := io.ReadFull(br, b); err != nil {
 		log.Fatal(err)
 	}
-	samples := make([]float64, len(data)/depth)
-	for i := 0; i < len(data)-2; i += 2 {
-		samples[i/2] = float64(int16(uint16(data[i]) | uint16(data[i+1])<<8))
+	samples := make([]float64, windowSize)
+	for i := 0; i < len(b)-2; i += 2 {
+		samples[i/2] = float64(int16(uint16(b[i]) | uint16(b[i+1])<<8))
 	}
 
-	tmp := make([]float64, windowSize)
-
+	b = b[:step*depth]
 	var hashes []uint32
 	var prevEnergies [len(fftBins)]float64
-
-	for i := 0; i < len(samples)-windowSize; i += step {
-		for j := range samples[i : i+windowSize] {
-			tmp[j] = hamming[j] * samples[i+j]
+	tmp := make([]float64, windowSize)
+	for {
+		for i, sample := range samples {
+			tmp[i] = hamming[i] * sample
 		}
-		freqc := fft.FFTReal(tmp)
 
+		dft := fft.FFTReal(tmp)
 		var energies [len(fftBins)]float64
 		for bin, binLimits := range fftBins {
 			for fftBin := binLimits[0]; fftBin <= binLimits[1]; fftBin++ {
-				energies[bin] += cmplx.Abs(freqc[fftBin])
+				energies[bin] += cmplx.Abs(dft[fftBin])
 			}
 		}
 
@@ -109,6 +111,20 @@ func hashes(path string) []uint32 {
 		}
 		hashes = append(hashes, hash)
 		prevEnergies = energies
+
+		// Slide window forward
+		if _, err := io.ReadFull(br, b); err != nil {
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
+				// XXX we shouldn't drop the remainder of the file
+				// under the table
+				break
+			}
+			log.Fatal(err)
+		}
+		copy(samples, samples[step:])
+		for i := 0; i < len(b)-2; i += 2 {
+			samples[len(samples)-step+i/2] = float64(int16(uint16(b[i]) | uint16(b[i+1])<<8))
+		}
 	}
 
 	return hashes
@@ -116,7 +132,6 @@ func hashes(path string) []uint32 {
 
 func main() {
 	h1 := hashes(os.Args[1])
-	return
 	h2 := hashes(os.Args[2])
 
 	total := len(h1) * 32
