@@ -1,14 +1,16 @@
 package sndprint
 
+// #cgo pkg-config: fftw3
+// #include <fftw3.h>
+import "C"
+
 import (
 	"bufio"
 	"io"
 	"log"
 	"math"
 	"math/bits"
-	"math/cmplx"
-
-	"github.com/mjibson/go-dsp/fft"
+	"unsafe"
 )
 
 /*
@@ -78,6 +80,12 @@ func init() {
 	}
 }
 
+type complex struct {
+	real, imag float64
+}
+
+func (x complex) Abs() float64 { return math.Hypot(x.real, x.imag) }
+
 func Hash(r io.Reader) []uint32 {
 	br := bufio.NewReader(r)
 
@@ -94,17 +102,23 @@ func Hash(r io.Reader) []uint32 {
 	b = b[:step*depth]
 	var hashes []uint32
 	var prevEnergies [len(fftBins)]float64
-	tmp := make([]float64, windowSize)
+
+	in := C.fftw_alloc_real(windowSize)
+	out := C.fftw_alloc_complex(windowSize) // XXX
+	plan := C.fftw_plan_dft_r2c_1d(windowSize, in, out, 0)
+	tmp := (*[math.MaxInt32]float64)(unsafe.Pointer(in))[:windowSize]
+	dft := (*[math.MaxInt32]complex)(unsafe.Pointer(out))[:windowSize]
 	for {
 		for i, sample := range samples {
 			tmp[i] = hamming[i] * sample
 		}
 
-		dft := fft.FFTReal(tmp)
+		// dft := fft.FFTReal(tmp)
+		C.fftw_execute(plan)
 		var energies [len(fftBins)]float64
 		for bin, binLimits := range fftBins {
 			for fftBin := binLimits[0]; fftBin <= binLimits[1]; fftBin++ {
-				energies[bin] += cmplx.Abs(dft[fftBin])
+				energies[bin] += dft[fftBin].Abs()
 			}
 		}
 
