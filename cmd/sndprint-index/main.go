@@ -33,10 +33,18 @@ func main() {
 	}
 	defer f.Close()
 	h1 := sndprint.Hash(f)
-	for off, h := range h1 {
-		_, err := db.Exec(`INSERT INTO hashes (hash, song, off) VALUES ($1, $2, $3)`, int32(h), *uuid, off)
+
+	tx, err := db.Begin()
+	if err != nil {
+		panic(err)
+	}
+
+	for off := range h1[0] {
+		_, err := tx.Exec(`INSERT INTO hashes (hash0, hash1, hash2, hash3, song, off) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING`,
+			int32(h1[0][off]), int32(h1[1][off]), int32(h1[2][off]), int32(h1[3][off]), *uuid, off+16)
 		if err != nil {
 			panic(err)
 		}
 	}
+	tx.Commit()
 }

@@ -6,11 +6,10 @@ import (
 	"math/bits"
 	"os"
 	"sort"
-
-	"honnef.co/go/sndprint"
-	"honnef.co/go/spew"
+	"strings"
 
 	"github.com/lib/pq"
+	"honnef.co/go/sndprint"
 )
 
 func ber(s1, s2 []uint32) float64 {
@@ -47,82 +46,88 @@ func main() {
 	}
 	defer f.Close()
 	h := sndprint.Hash(f)
-	if len(h) < minSampleLength {
+	if len(h[0]) < minSampleLength {
 		fmt.Fprintln(os.Stderr, "Sample too short")
 		os.Exit(2)
 	}
-	sampleLength := len(h)
-	type checkKey struct {
-		song     string
-		offStart int64
-		offEnd   int64
+
+	type candidate struct {
+		song string
+		rng  [2]int
 	}
-	checked := map[checkKey]float64{}
-	for i, hash := range h {
-		if hash == 0 {
-			// A lot of songs have silence
+	candidateScores := map[candidate]int{}
+	for i := range h[0] {
+		var conds []string
+		var args []interface{}
+		for j := range h {
+			if h[j][i] != 0 {
+				conds = append(conds, fmt.Sprintf("hash%d = $%d", j, len(args)+1))
+				args = append(args, int32(h[j][i]))
+			}
+		}
+		if len(conds) == 0 {
 			continue
 		}
-		rows, err := db.Query(`SELECT song, array_agg(off) FROM hashes WHERE hash = $1 GROUP BY song`, int32(hash))
+
+		rows, err := db.Query(`SELECT song, off FROM hashes WHERE `+strings.Join(conds, " OR "), args...)
 		if err != nil {
 			panic(err)
 		}
 		for rows.Next() {
-			var song []byte
-			var offs []int64
-			if err := rows.Scan(&song, pq.Array(&offs)); err != nil {
+			var song string
+			var off int
+			if err := rows.Scan(&song, &off); err != nil {
 				panic(err)
 			}
-
-			// OPT(dh): we can thin out the result set by coalescing sequential matches for the same song
-			for _, off := range offs {
-				if int64(i) > off {
-					// Impossible match, sample_n can't ever occur before song_n
-					continue
-				}
-
-				{
-					start, end := off-int64(i), off+int64(sampleLength)-int64(i)
-					if _, ok := checked[checkKey{string(song), start, end}]; ok {
-						// We've already checked this segment
-						continue
-					}
-					rows, err := db.Query(`SELECT hash FROM hashes WHERE song = $1 AND off >= $2 AND off <= $3 LIMIT $4`, song, start, end, sampleLength)
-					if err != nil {
-						panic(err)
-					}
-					hashes := make([]uint32, 0, sampleLength)
-					for rows.Next() {
-						var hash int32
-						if err := rows.Scan(&hash); err != nil {
-							panic(err)
-						}
-						hashes = append(hashes, uint32(hash))
-					}
-					if rows.Err() != nil {
-						panic(rows.Err())
-					}
-
-					checked[checkKey{string(song), start, end}] = ber(h, hashes)
-				}
-			}
-		}
-		if rows.Err() != nil {
-			panic(rows.Err())
+			start, end := off-i, off+len(h[0])-i-1
+			candidateScores[candidate{song, [2]int{start, end}}]++
 		}
 	}
+
+	var candidates []candidate
+	for k := range candidateScores {
+		candidates = append(candidates, k)
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidateScores[candidates[i]] > candidateScores[candidates[j]]
+	})
 
 	type result struct {
-		key   checkKey
-		match float64
+		song  string
+		rng   [2]int
+		score float64
 	}
+	var bers []result
+	for _, c := range candidates {
+		var hashes [len(h)][]int64
+		row := db.QueryRow(`SELECT array_agg(hash0), array_agg(hash1), array_agg(hash2), array_agg(hash3) FROM hashes WHERE song = $1 AND off >= $2 AND off <= $3`,
+			c.song, c.rng[0], c.rng[1])
+		if err := row.Scan(pq.Array(&hashes[0]), pq.Array(&hashes[1]), pq.Array(&hashes[2]), pq.Array(&hashes[3])); err != nil {
+			panic(err)
+		}
 
-	var results []result
-	for k, v := range checked {
-		results = append(results, result{k, v})
+		if len(hashes[0]) != len(h[0]) {
+			continue
+		}
+
+		var hh [4][]uint32
+		for i := range hh {
+			hh[i] = make([]uint32, len(hashes[0]))
+		}
+		for i := range hashes[0] {
+			for j := range hh {
+				hh[j][i] = uint32(hashes[j][i])
+			}
+		}
+
+		for i := range hh {
+			bers = append(bers, result{c.song, c.rng, ber(h[i], hh[i])})
+		}
 	}
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].match < results[j].match
+	sort.Slice(bers, func(i, j int) bool {
+		return bers[i].score < bers[j].score
 	})
-	spew.Dump(results)
+	for _, r := range bers {
+		fmt.Printf("%s [%6d - %6d]: %.2f\n", r.song, r.rng[0], r.rng[1], r.score)
+	}
 }
