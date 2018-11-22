@@ -119,7 +119,7 @@ func main() {
 	type result struct {
 		song  string
 		rng   [2]int
-		score float64
+		score [len(h)]float64
 	}
 	var bers []result
 	for _, c := range candidates {
@@ -144,12 +144,19 @@ func main() {
 			}
 		}
 
-		for i := range hh {
-			bers = append(bers, result{c.song, c.rng, ber(h[i], hh[i])})
+		var res [len(h)]float64
+		for k := range hh {
+			res[k] = ber(h[k], hh[k])
 		}
+		bers = append(bers, result{c.song, c.rng, res})
 	}
 	sort.Slice(bers, func(i, j int) bool {
-		return bers[i].score < bers[j].score
+		var s1, s2 float64
+		for k := range bers[i].score {
+			s1 += bers[i].score[k]
+			s2 += bers[j].score[k]
+		}
+		return s1 < s2
 	})
 	for _, r := range bers {
 		fmt.Printf("%s [%6d - %6d]: %.2f\n", r.song, r.rng[0], r.rng[1], r.score)
