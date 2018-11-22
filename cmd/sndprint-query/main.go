@@ -51,6 +51,30 @@ func main() {
 		os.Exit(2)
 	}
 
+	start := len(h[0])
+	end := 0
+	for k := range h {
+		for i, v := range h[k] {
+			if v != 0 {
+				if i-1 < start {
+					start = i
+				}
+				break
+			}
+		}
+		for i := len(h[k]) - 1; i >= 0; i-- {
+			if h[k][i] != 0 {
+				if i+1 > end {
+					end = i + 1
+				}
+				break
+			}
+		}
+	}
+	for k := range h {
+		h[k] = h[k][start:end]
+	}
+
 	type candidate struct {
 		song string
 		rng  [2]int
