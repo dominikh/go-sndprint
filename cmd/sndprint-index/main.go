@@ -32,7 +32,7 @@ func main() {
 		os.Exit(2)
 	}
 	defer f.Close()
-	h1 := sndprint.Hash(f)
+	h1 := sndprint.Hash(f, 0)
 
 	tx, err := db.Begin()
 	if err != nil {

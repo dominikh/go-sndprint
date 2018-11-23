@@ -2,7 +2,9 @@ package main
 
 import (
 	"database/sql"
+	"flag"
 	"fmt"
+	"io"
 	"math/bits"
 	"os"
 	"sort"
@@ -27,10 +29,13 @@ func ber(s1, s2 []uint32) float64 {
 const berCutoff = 0.25
 
 func main() {
+	seconds := flag.Int("t", 0, "Max seconds to process")
+	flag.Parse()
+
 	const minSampleLength = 256
 
-	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "Usage: sndprint-query <file>")
+	if len(flag.Args()) > 2 {
+		fmt.Fprintln(os.Stderr, "Usage: sndprint-query [file]")
 		os.Exit(2)
 	}
 
@@ -39,13 +44,18 @@ func main() {
 		panic(err)
 	}
 
-	f, err := os.Open(os.Args[1])
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Could not open file:", err)
-		os.Exit(2)
+	var r io.Reader = os.Stdin
+	if len(flag.Args()) == 2 {
+		f, err := os.Open(flag.Args()[1])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Could not open file:", err)
+			os.Exit(2)
+		}
+		defer f.Close()
+		r = f
 	}
-	defer f.Close()
-	h := sndprint.Hash(f)
+
+	h := sndprint.Hash(r, *seconds*11025)
 	if len(h[0]) < minSampleLength {
 		fmt.Fprintln(os.Stderr, "Sample too short")
 		os.Exit(2)
