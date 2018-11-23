@@ -8,7 +8,6 @@ import (
 	"math/bits"
 	"os"
 	"sort"
-	"strings"
 
 	"github.com/lib/pq"
 	"honnef.co/go/sndprint"
@@ -90,31 +89,41 @@ func main() {
 		rng  [2]int
 	}
 	candidateScores := map[candidate]int{}
+	args := [][]int32{
+		{},
+		{},
+		{},
+		{},
+	}
 	for i := range h[0] {
-		var conds []string
-		var args []interface{}
 		for j := range h {
 			if h[j][i] != 0 {
-				conds = append(conds, fmt.Sprintf("hash%d = $%d", j, len(args)+1))
-				args = append(args, int32(h[j][i]))
+				args[j] = append(args[j], int32(h[j][i]))
 			}
 		}
-		if len(conds) == 0 {
-			continue
-		}
+	}
 
-		rows, err := db.Query(`SELECT song, off FROM hashes WHERE `+strings.Join(conds, " OR "), args...)
-		if err != nil {
+	rows, err := db.Query(`SELECT song, off, hash0, hash1, hash2, hash3  FROM hashes WHERE hash0 = ANY ($1) OR hash1 = ANY ($2) OR hash2 = ANY ($3) OR hash3 = ANY ($4)`,
+		pq.Array(args[0]), pq.Array(args[1]), pq.Array(args[2]), pq.Array(args[3]))
+	if err != nil {
+		panic(err)
+	}
+	for rows.Next() {
+		var song string
+		var off int
+		var hashes [4]int32
+		if err := rows.Scan(&song, &off, &hashes[0], &hashes[1], &hashes[2], &hashes[3]); err != nil {
 			panic(err)
 		}
-		for rows.Next() {
-			var song string
-			var off int
-			if err := rows.Scan(&song, &off); err != nil {
-				panic(err)
+
+		// figure out the offsets in the query hash block, so that we can align it.
+		for k := range hashes {
+			for i, hh := range args[k] {
+				if hh == hashes[k] {
+					start, end := off-i, off+len(h[0])-i-1
+					candidateScores[candidate{song, [2]int{start, end}}]++
+				}
 			}
-			start, end := off-i, off+len(h[0])-i-1
-			candidateScores[candidate{song, [2]int{start, end}}]++
 		}
 	}
 
