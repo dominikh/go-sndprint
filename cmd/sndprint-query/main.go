@@ -84,17 +84,96 @@ func main() {
 		h[k] = h[k][start:end]
 	}
 
-	type candidate struct {
-		song string
-		rng  [2]int
+	for attempt := uint(0); attempt < 32; attempt++ {
+		candidates, err := fetchCandidates(db, h)
+		if err != nil {
+			panic(err)
+		}
+		type result struct {
+			song  string
+			rng   [2]int
+			score [len(h)]float64
+		}
+		var bers []result
+		for _, c := range candidates {
+			hh, err := fetchHashes(db, c.song, c.rng[0], c.rng[1])
+			if err != nil {
+				panic(err)
+			}
+			if len(hh[0]) != len(h[0]) {
+				continue
+			}
+
+			var res [len(h)]float64
+			for k := range hh {
+				res[k] = ber(h[k], hh[k])
+			}
+			bers = append(bers, result{c.song, c.rng, res})
+		}
+		sort.Slice(bers, func(i, j int) bool {
+			var s1, s2 float64
+			for k := range bers[i].score {
+				s1 += bers[i].score[k]
+				s2 += bers[j].score[k]
+			}
+			return s1 < s2
+		})
+		if len(bers) > 0 {
+			best := (bers[0].score[0] + bers[0].score[1] + bers[0].score[2] + bers[0].score[3]) / float64(len(bers[0].score))
+			if best <= threshold {
+				for _, r := range bers {
+					fmt.Printf("%s [%6d - %6d]: %.2f\n", r.song, r.rng[0], r.rng[1], r.score)
+				}
+				return
+			}
+		}
+
+		// found no match, flip one bit and try again
+		if attempt > 0 {
+			for k := range h {
+				for i := range h[k] {
+					h[k][i] ^= 1 << (attempt - 1)
+				}
+			}
+		}
+		for k := range h {
+			for i := range h[k] {
+				h[k][i] ^= 1 << attempt
+			}
+		}
 	}
+}
+
+const threshold = 0.35
+
+func fetchHashes(db *sql.DB, song string, start, end int) ([4][]uint32, error) {
+	var hashes [4][]int64
+	row := db.QueryRow(`SELECT array_agg(hash0), array_agg(hash1), array_agg(hash2), array_agg(hash3) FROM hashes WHERE song = $1 AND off >= $2 AND off <= $3`,
+		song, start, end)
+	if err := row.Scan(pq.Array(&hashes[0]), pq.Array(&hashes[1]), pq.Array(&hashes[2]), pq.Array(&hashes[3])); err != nil {
+		return [4][]uint32{}, nil
+	}
+
+	var hh [4][]uint32
+	for i := range hh {
+		hh[i] = make([]uint32, len(hashes[0]))
+	}
+	for i := range hashes[0] {
+		for j := range hh {
+			hh[j][i] = uint32(hashes[j][i])
+		}
+	}
+	return hh, nil
+}
+
+type candidate struct {
+	song string
+	rng  [2]int
+}
+
+func fetchCandidates(db *sql.DB, h [4][]uint32) ([]candidate, error) {
 	candidateScores := map[candidate]int{}
-	args := [][]int32{
-		{},
-		{},
-		{},
-		{},
-	}
+	args := [4][]int32{}
 	for i := range h[0] {
 		for j := range h {
 			args[j] = append(args[j], int32(h[j][i]))
@@ -108,14 +187,14 @@ WHERE (hash0 = ANY ($1) OR hash1 = ANY ($2) OR hash2 = ANY ($3) OR hash3 = ANY (
       AND hash0 <> 0 AND hash1 <> 0 AND hash2 <> 0 AND hash3<> 0`,
 		pq.Array(args[0]), pq.Array(args[1]), pq.Array(args[2]), pq.Array(args[3]))
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	for rows.Next() {
 		var song string
 		var off int
 		var hashes [4]int32
 		if err := rows.Scan(&song, &off, &hashes[0], &hashes[1], &hashes[2], &hashes[3]); err != nil {
-			panic(err)
+			return nil, err
 		}
 
 		// figure out the offsets in the query hash block, so that we can align it.
@@ -133,53 +212,6 @@ WHERE (hash0 = ANY ($1) OR hash1 = ANY ($2) OR hash2 = ANY ($3) OR hash3 = ANY (
 	for k := range candidateScores {
 		candidates = append(candidates, k)
 	}
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidateScores[candidates[i]] > candidateScores[candidates[j]]
-	})
 
-	type result struct {
-		song  string
-		rng   [2]int
-		score [len(h)]float64
-	}
-	var bers []result
-	for _, c := range candidates {
-		var hashes [len(h)][]int64
-		row := db.QueryRow(`SELECT array_agg(hash0), array_agg(hash1), array_agg(hash2), array_agg(hash3) FROM hashes WHERE song = $1 AND off >= $2 AND off <= $3`,
-			c.song, c.rng[0], c.rng[1])
-		if err := row.Scan(pq.Array(&hashes[0]), pq.Array(&hashes[1]), pq.Array(&hashes[2]), pq.Array(&hashes[3])); err != nil {
-			panic(err)
-		}
-
-		if len(hashes[0]) != len(h[0]) {
-			continue
-		}
-
-		var hh [4][]uint32
-		for i := range hh {
-			hh[i] = make([]uint32, len(hashes[0]))
-		}
-		for i := range hashes[0] {
-			for j := range hh {
-				hh[j][i] = uint32(hashes[j][i])
-			}
-		}
-
-		var res [len(h)]float64
-		for k := range hh {
-			res[k] = ber(h[k], hh[k])
-		}
-		bers = append(bers, result{c.song, c.rng, res})
-	}
-	sort.Slice(bers, func(i, j int) bool {
-		var s1, s2 float64
-		for k := range bers[i].score {
-			s1 += bers[i].score[k]
-			s2 += bers[j].score[k]
-		}
-		return s1 < s2
-	})
-	for _, r := range bers {
-		fmt.Printf("%s [%6d - %6d]: %.2f\n", r.song, r.rng[0], r.rng[1], r.score)
-	}
+	return candidates, nil
 }
