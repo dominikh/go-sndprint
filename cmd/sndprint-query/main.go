@@ -86,6 +86,7 @@ func main() {
 		h[k] = h[k][start:end]
 	}
 
+	checked := map[candidate]bool{}
 	for attempt := uint(0); attempt < 32; attempt++ {
 		if *verbose {
 			log.Println("Attempt", attempt)
@@ -104,6 +105,10 @@ func main() {
 		}
 		var bers []result
 		for _, c := range candidates {
+			if checked[c] {
+				continue
+			}
+			checked[c] = true
 			hh, err := fetchHashes(db, c.song, c.rng[0], c.rng[1])
 			if err != nil {
 				panic(err)
