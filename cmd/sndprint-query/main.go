@@ -97,13 +97,15 @@ func main() {
 	}
 	for i := range h[0] {
 		for j := range h {
-			if h[j][i] != 0 {
-				args[j] = append(args[j], int32(h[j][i]))
-			}
+			args[j] = append(args[j], int32(h[j][i]))
 		}
 	}
 
-	rows, err := db.Query(`SELECT song, off, hash0, hash1, hash2, hash3  FROM hashes WHERE hash0 = ANY ($1) OR hash1 = ANY ($2) OR hash2 = ANY ($3) OR hash3 = ANY ($4)`,
+	rows, err := db.Query(`
+SELECT song, off, hash0, hash1, hash2, hash3
+FROM hashes
+WHERE (hash0 = ANY ($1) OR hash1 = ANY ($2) OR hash2 = ANY ($3) OR hash3 = ANY ($4))
+      AND hash0 <> 0 AND hash1 <> 0 AND hash2 <> 0 AND hash3<> 0`,
 		pq.Array(args[0]), pq.Array(args[1]), pq.Array(args[2]), pq.Array(args[3]))
 	if err != nil {
 		panic(err)
