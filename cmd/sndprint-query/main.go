@@ -130,7 +130,11 @@ func main() {
 			best := (bers[0].score[0] + bers[0].score[1] + bers[0].score[2] + bers[0].score[3]) / float64(len(bers[0].score))
 			if best <= threshold {
 				for _, r := range bers {
-					fmt.Printf("%s [%6d - %6d]: %.2f\n", r.song, r.rng[0], r.rng[1], r.score)
+					if (r.score[0]+r.score[1]+r.score[2]+r.score[3])/float64(len(r.score)) <= threshold {
+						fmt.Printf("%s [%6d - %6d]: %.2f\n", r.song, r.rng[0], r.rng[1], r.score)
+					} else {
+						break
+					}
 				}
 				return
 			}
