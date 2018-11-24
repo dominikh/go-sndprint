@@ -177,23 +177,26 @@ func main() {
 const threshold = 0.35
 
 func fetchHashes(db *sql.DB, song string, start, end int) ([4][]uint32, error) {
-	var hashes [4][]int64
-	row := db.QueryRow(`SELECT array_agg(hash0), array_agg(hash1), array_agg(hash2), array_agg(hash3) FROM hashes WHERE song = $1 AND off >= $2 AND off <= $3`,
-		song, start, end)
-	if err := row.Scan(pq.Array(&hashes[0]), pq.Array(&hashes[1]), pq.Array(&hashes[2]), pq.Array(&hashes[3])); err != nil {
-		return [4][]uint32{}, nil
+	rows, err := db.Query(`SELECT hash0, hash1, hash2, hash3 FROM hashes WHERE song = $1 AND off >= $2 AND off <= $3`, song, start, end)
+	if err != nil {
+		return [4][]uint32{}, err
 	}
-
-	var hh [4][]uint32
-	for i := range hh {
-		hh[i] = make([]uint32, len(hashes[0]))
+	defer rows.Close()
+	var hashes [4][]uint32
+	for k := range hashes {
+		hashes[k] = make([]uint32, 0, end-start)
 	}
-	for i := range hashes[0] {
-		for j := range hh {
-			hh[j][i] = uint32(hashes[j][i])
+	for rows.Next() {
+		var hash [4]int32
+		if err := rows.Scan(&hash[0], &hash[1], &hash[2], &hash[3]); err != nil {
+			return [4][]uint32{}, err
+		}
+		for i, h := range hash {
+			hashes[i] = append(hashes[i], uint32(h))
 		}
 	}
-	return hh, nil
+
+	return hashes, nil
 }
 
 type candidate struct {
