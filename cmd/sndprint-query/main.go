@@ -138,9 +138,13 @@ func main() {
 
 				var res [len(h)]float64
 				for k := range hh {
-					res[k] = ber(h[k], hh[k][off:len(hh[k])-(c.span-off)])
+					res[k] = ber(h[k], hh[k][off:len(h[0])])
 				}
-				bers = append(bers, result{c.song, c.rng, res})
+				rng := [2]int{
+					c.rng[0] + off,
+					c.rng[0] + off + len(h[0]),
+				}
+				bers = append(bers, result{c.song, rng, res})
 			}
 		}
 		sort.Slice(bers, func(i, j int) bool {
@@ -154,9 +158,15 @@ func main() {
 		if len(bers) > 0 {
 			best := min(bers[0].score[0], bers[0].score[1], bers[0].score[2], bers[0].score[3])
 			if best <= threshold {
+				prevSong := ""
 				for _, r := range bers {
 					if min(r.score[0], r.score[1], r.score[2], r.score[3]) <= threshold {
-						fmt.Printf("%s [%6d - %6d]: %.2f\n", r.song, r.rng[0], r.rng[1], r.score)
+						if r.song == prevSong {
+							fmt.Printf("%37s[%6d - %6d]: %.2f\n", "", r.rng[0], r.rng[1], r.score)
+						} else {
+							prevSong = r.song
+							fmt.Printf("%s [%6d - %6d]: %.2f\n", r.song, r.rng[0], r.rng[1], r.score)
+						}
 					} else {
 						break
 					}
