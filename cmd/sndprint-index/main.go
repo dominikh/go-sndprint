@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"time"
 
 	"honnef.co/go/sndprint"
 
@@ -53,7 +52,6 @@ func main() {
 	defer f.Close()
 	h1 := sndprint.Hash(f, 0)
 
-	t := time.Now()
 	var data [][]interface{}
 	for i := range h1[0] {
 		data = append(data, []interface{}{
@@ -66,10 +64,8 @@ func main() {
 		})
 	}
 
-	n, err := db.CopyFrom(pgx.Identifier{"hashes"}, []string{"hash0", "hash1", "hash2", "hash3", "off", "song"}, pgx.CopyFromRows(data))
+	_, err = db.CopyFrom(pgx.Identifier{"hashes"}, []string{"hash0", "hash1", "hash2", "hash3", "off", "song"}, pgx.CopyFromRows(data))
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(n)
-	fmt.Println(time.Since(t))
 }
