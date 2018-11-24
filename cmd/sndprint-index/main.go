@@ -2,15 +2,30 @@
 package main
 
 import (
-	"database/sql"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"honnef.co/go/sndprint"
 
-	"github.com/lib/pq"
+	"github.com/jackc/pgx"
 )
+
+func parseMBID(mbid string) [16]byte {
+	if len(mbid) != 36 {
+		return [16]byte{}
+	}
+	uuid, err := hex.DecodeString(string(mbid[0:8] + mbid[9:13] + mbid[14:18] + mbid[19:23] + mbid[24:36]))
+	if err != nil {
+		// XXX
+		panic(err)
+	}
+	var out [16]byte
+	copy(out[:], uuid)
+	return out
+}
 
 func main() {
 	uuid := flag.String("u", "", "UUID")
@@ -21,7 +36,11 @@ func main() {
 		os.Exit(2)
 	}
 
-	db, err := sql.Open("postgres", "")
+	conf, err := pgx.ParseEnvLibpq()
+	if err != nil {
+		panic(err)
+	}
+	db, err := pgx.Connect(conf)
 	if err != nil {
 		panic(err)
 	}
@@ -34,17 +53,23 @@ func main() {
 	defer f.Close()
 	h1 := sndprint.Hash(f, 0)
 
-	var h2 [len(h1)][]int32
-	for i := range h1 {
-		h2[i] = make([]int32, len(h1[i]))
-		for j := range h1[i] {
-			h2[i][j] = int32(h1[i][j])
-		}
+	t := time.Now()
+	var data [][]interface{}
+	for i := range h1[0] {
+		data = append(data, []interface{}{
+			int32(h1[0][i]),
+			int32(h1[1][i]),
+			int32(h1[2][i]),
+			int32(h1[3][i]),
+			i,
+			parseMBID(*uuid),
+		})
 	}
 
-	_, err = db.Exec(`INSERT INTO hashes (hash0, hash1, hash2, hash3, off, song) (SELECT *, $5::UUID FROM UNNEST ($1::integer[], $2::integer[], $3::integer[], $4::integer[]) WITH ORDINALITY) ON CONFLICT DO NOTHING`,
-		pq.Array(h2[0]), pq.Array(h2[1]), pq.Array(h2[2]), pq.Array(h2[3]), *uuid)
+	n, err := db.CopyFrom(pgx.Identifier{"hashes"}, []string{"hash0", "hash1", "hash2", "hash3", "off", "song"}, pgx.CopyFromRows(data))
 	if err != nil {
 		panic(err)
 	}
+	fmt.Println(n)
+	fmt.Println(time.Since(t))
 }

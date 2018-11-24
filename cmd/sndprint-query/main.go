@@ -1,7 +1,6 @@
 package main
 
 import (
-	"database/sql"
 	"flag"
 	"fmt"
 	"io"
@@ -10,8 +9,9 @@ import (
 	"os"
 	"sort"
 
-	"github.com/lib/pq"
 	"honnef.co/go/sndprint"
+
+	"github.com/jackc/pgx"
 )
 
 func ber(s1, s2 []uint32) float64 {
@@ -53,7 +53,11 @@ func main() {
 		os.Exit(2)
 	}
 
-	db, err := sql.Open("postgres", "")
+	conf, err := pgx.ParseEnvLibpq()
+	if err != nil {
+		panic(err)
+	}
+	db, err := pgx.Connect(conf)
 	if err != nil {
 		panic(err)
 	}
@@ -176,7 +180,7 @@ func main() {
 
 const threshold = 0.35
 
-func fetchHashes(db *sql.DB, song string, start, end int) ([4][]uint32, error) {
+func fetchHashes(db *pgx.Conn, song string, start, end int) ([4][]uint32, error) {
 	rows, err := db.Query(`SELECT hash0, hash1, hash2, hash3 FROM hashes WHERE song = $1 AND off >= $2 AND off <= $3`, song, start, end)
 	if err != nil {
 		return [4][]uint32{}, err
@@ -204,7 +208,7 @@ type candidate struct {
 	rng  [2]int
 }
 
-func fetchCandidates(db *sql.DB, h [4][]uint32) ([]candidate, error) {
+func fetchCandidates(db *pgx.Conn, h [4][]uint32) ([]candidate, error) {
 	candidateScores := map[candidate]int{}
 	args := [4][]int32{}
 	for i := range h[0] {
@@ -218,7 +222,7 @@ SELECT song, off, hash0, hash1, hash2, hash3
 FROM hashes
 WHERE (hash0 = ANY ($1) OR hash1 = ANY ($2) OR hash2 = ANY ($3) OR hash3 = ANY ($4))
       AND hash0 <> 0 AND hash1 <> 0 AND hash2 <> 0 AND hash3<> 0`,
-		pq.Array(args[0]), pq.Array(args[1]), pq.Array(args[2]), pq.Array(args[3]))
+		args[0], args[1], args[2], args[3])
 	if err != nil {
 		return nil, err
 	}
@@ -232,8 +236,8 @@ WHERE (hash0 = ANY ($1) OR hash1 = ANY ($2) OR hash2 = ANY ($3) OR hash3 = ANY (
 
 		// figure out the offsets in the query hash block, so that we can align it.
 		for k := range hashes {
-			for i, hh := range args[k] {
-				if hh == hashes[k] {
+			for i, hh := range h[k] {
+				if int32(hh) == hashes[k] {
 					start, end := off-i, off+len(h[0])-i-1
 					candidateScores[candidate{song, [2]int{start, end}}]++
 				}
