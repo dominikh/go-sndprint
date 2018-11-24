@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"math/bits"
 	"os"
 	"sort"
@@ -28,6 +29,7 @@ func ber(s1, s2 []uint32) float64 {
 const berCutoff = 0.25
 
 func main() {
+	verbose := flag.Bool("v", false, "Enable verbose output")
 	seconds := flag.Int("t", 0, "Max seconds to process")
 	flag.Parse()
 
@@ -85,9 +87,15 @@ func main() {
 	}
 
 	for attempt := uint(0); attempt < 32; attempt++ {
+		if *verbose {
+			log.Println("Attempt", attempt)
+		}
 		candidates, err := fetchCandidates(db, h)
 		if err != nil {
 			panic(err)
+		}
+		if *verbose {
+			log.Println("Found", len(candidates), "candidates")
 		}
 		type result struct {
 			song  string
