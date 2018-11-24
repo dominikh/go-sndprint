@@ -28,6 +28,19 @@ func ber(s1, s2 []uint32) float64 {
 
 const berCutoff = 0.25
 
+func min(xs ...float64) float64 {
+	if len(xs) == 0 {
+		return 0
+	}
+	min := xs[0]
+	for _, x := range xs {
+		if x < min {
+			min = x
+		}
+	}
+	return min
+}
+
 func main() {
 	verbose := flag.Bool("v", false, "Enable verbose output")
 	seconds := flag.Int("t", 0, "Max seconds to process")
@@ -132,10 +145,10 @@ func main() {
 			return s1 < s2
 		})
 		if len(bers) > 0 {
-			best := (bers[0].score[0] + bers[0].score[1] + bers[0].score[2] + bers[0].score[3]) / float64(len(bers[0].score))
+			best := min(bers[0].score[0], bers[0].score[1], bers[0].score[2], bers[0].score[3])
 			if best <= threshold {
 				for _, r := range bers {
-					if (r.score[0]+r.score[1]+r.score[2]+r.score[3])/float64(len(r.score)) <= threshold {
+					if min(r.score[0], r.score[1], r.score[2], r.score[3]) <= threshold {
 						fmt.Printf("%s [%6d - %6d]: %.2f\n", r.song, r.rng[0], r.rng[1], r.score)
 					} else {
 						break
