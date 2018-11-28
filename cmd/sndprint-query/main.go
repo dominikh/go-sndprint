@@ -108,7 +108,17 @@ func main() {
 		if *verbose {
 			log.Println("Attempt", attempt)
 		}
-		candidates, err := fetchCandidates(db, h)
+
+		var q [4][]uint32
+		for k := range h {
+			for _, v := range h[k] {
+				if v != 0 {
+					q[k] = append(q[k], v)
+				}
+			}
+		}
+
+		candidates, err := fetchCandidates(db, q)
 		if err != nil {
 			panic(err)
 		}
@@ -226,9 +236,9 @@ type candidate struct {
 func fetchCandidates(db *pgx.Conn, h [4][]uint32) ([]candidate, error) {
 	candidateScores := map[candidate]int{}
 	args := [4][]int32{}
-	for i := range h[0] {
-		for j := range h {
-			args[j] = append(args[j], int32(h[j][i]))
+	for k := range h {
+		for _, v := range h[k] {
+			args[k] = append(args[k], int32(v))
 		}
 	}
 
@@ -236,7 +246,7 @@ func fetchCandidates(db *pgx.Conn, h [4][]uint32) ([]candidate, error) {
 SELECT song, off, hash0, hash1, hash2, hash3
 FROM hashes
 WHERE (hash0 = ANY ($1) OR hash1 = ANY ($2) OR hash2 = ANY ($3) OR hash3 = ANY ($4))
-      AND hash0 <> 0 AND hash1 <> 0 AND hash2 <> 0 AND hash3<> 0`,
+`,
 		args[0], args[1], args[2], args[3])
 	if err != nil {
 		return nil, err
