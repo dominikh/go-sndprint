@@ -91,7 +91,7 @@ type complex struct {
 
 func (x complex) Abs() float64 { return math.Hypot(x.real, x.imag) }
 
-func Hash(r io.Reader, maxSamples int) [4][]uint32 {
+func Hash(r io.Reader) [4][]uint32 {
 	br := bufio.NewReader(r)
 
 	// Read initial set of samples
@@ -113,9 +113,7 @@ func Hash(r io.Reader, maxSamples int) [4][]uint32 {
 	dft := (*[math.MaxInt32]complex)(unsafe.Pointer(out))[:windowSize]
 
 	var bandEnergies [][len(fftBins)]float64
-	totalSamples := 0
-	for maxSamples == 0 || totalSamples < maxSamples {
-		totalSamples += step
+	for {
 		for i, sample := range samples {
 			tmp[i] = hamming[i] * sample
 		}

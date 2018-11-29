@@ -49,8 +49,11 @@ func main() {
 		defer f.Close()
 		r = f
 	}
+	if *seconds > 0 {
+		r = &io.LimitedReader{R: r, N: int64(*seconds * 11025 * 2)}
+	}
 
-	h := sndprint.Hash(r, *seconds*11025)
+	h := sndprint.Hash(r)
 	if len(h[0]) < minSampleLength {
 		fmt.Fprintln(os.Stderr, "Sample too short")
 		os.Exit(2)

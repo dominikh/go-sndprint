@@ -29,7 +29,7 @@ func main() {
 		os.Exit(2)
 	}
 	defer f.Close()
-	h1 := sndprint.Hash(f, 0)
+	h1 := sndprint.Hash(f)
 	if err := db.AddSong(*uuid, h1); err != nil {
 		panic(err) // XXX
 	}
