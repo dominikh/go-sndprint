@@ -27,7 +27,7 @@ func main() {
 		os.Exit(2)
 	}
 	hashes := sndprint.Hash(r)
-	for _, hash := range hashes {
-		fmt.Printf("%#08x\n", hash)
+	for i := range hashes[0] {
+		fmt.Printf("%#08x %#08x %#08x %#08x\n", hashes[0][i], hashes[1][i], hashes[2][i], hashes[3][i])
 	}
 }
