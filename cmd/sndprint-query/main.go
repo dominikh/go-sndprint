@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/binary"
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"math/bits"
 	"os"
@@ -13,6 +15,12 @@ import (
 
 	"github.com/jackc/pgx"
 )
+
+func assert(b bool) {
+	if !b {
+		panic("assertion failed")
+	}
+}
 
 func ber(s1, s2 []uint32) float64 {
 	e := 0
@@ -26,19 +34,88 @@ func ber(s1, s2 []uint32) float64 {
 	return float64(e) / float64(len(s1)*32)
 }
 
-const berCutoff = 0.25
+type result struct {
+	song  string
+	rng   [2]int
+	score [4]float64
+}
 
-func min(xs ...float64) float64 {
-	if len(xs) == 0 {
-		return 0
+func match(db *pgx.Conn, verbose bool, h [4][]uint32, q [4][]uint32) []result {
+	candidates, err := fetchCandidates(db, q)
+	if err != nil {
+		panic(err)
 	}
-	min := xs[0]
-	for _, x := range xs {
-		if x < min {
-			min = x
+
+	checked := map[candidate]bool{}
+	if verbose {
+		log.Println("Found", len(candidates), "candidates")
+	}
+	hashes := map[string][4][]uint32{}
+	var bers []result
+	for _, c := range candidates {
+		if checked[c] {
+			continue
+		}
+		checked[c] = true
+		hh, ok := hashes[c.song]
+		if !ok {
+			hh, err = fetchHashes(c.song)
+			if err != nil {
+				panic(err)
+			}
+			hashes[c.song] = hh
+		}
+
+		for off := 0; off <= c.span; off++ {
+			if len(hh[0][off:]) < len(h[0]) {
+				continue
+			}
+
+			if c.rng[1] > len(hh[0]) {
+				continue
+			}
+			var d [4][]uint32
+			for k := range hh {
+				d[k] = hh[k][c.rng[0]:c.rng[1]]
+			}
+
+			var res [4]float64
+			for k := range d {
+				res[k] = ber(h[k], d[k][off:len(h[0])])
+			}
+			rng := [2]int{
+				c.rng[0] + off,
+				c.rng[0] + off + len(h[0]),
+			}
+			for _, v := range res {
+				if v <= threshold {
+					bers = append(bers, result{c.song, rng, res})
+					break
+				}
+			}
 		}
 	}
-	return min
+	sort.Slice(bers, func(i, j int) bool {
+		var s1, s2 float64
+		for k := range bers[i].score {
+			s1 += bers[i].score[k]
+			s2 += bers[j].score[k]
+		}
+		return s1 < s2
+	})
+	return bers
+}
+
+func printResults(bers []result) {
+	prevSong := ""
+	for _, r := range bers {
+		if r.song == prevSong {
+			fmt.Printf("%37s[%6d - %6d]: %.2f\n", "", r.rng[0], r.rng[1], r.score)
+		} else {
+			prevSong = r.song
+			fmt.Printf("%s [%6d - %6d]: %.2f\n", r.song, r.rng[0], r.rng[1], r.score)
+		}
+	}
 }
 
 func main() {
@@ -103,127 +180,46 @@ func main() {
 		h[k] = h[k][start:end]
 	}
 
-	checked := map[candidate]bool{}
-	for attempt := uint(0); attempt < 32; attempt++ {
-		if *verbose {
-			log.Println("Attempt", attempt)
-		}
+	bers := match(db, *verbose, h, h)
+	if len(bers) > 0 {
+		printResults(bers)
+		return
+	}
 
-		var q [4][]uint32
+	var q [4][]uint32
+	for attempt := uint(0); attempt < 32; attempt++ {
 		for k := range h {
 			for _, v := range h[k] {
-				if v != 0 {
-					q[k] = append(q[k], v)
-				}
-			}
-		}
-
-		candidates, err := fetchCandidates(db, q)
-		if err != nil {
-			panic(err)
-		}
-		if *verbose {
-			log.Println("Found", len(candidates), "candidates")
-		}
-		type result struct {
-			song  string
-			rng   [2]int
-			score [len(h)]float64
-		}
-		var bers []result
-		for _, c := range candidates {
-			if checked[c] {
-				continue
-			}
-			checked[c] = true
-			hh, err := fetchHashes(db, c.song, c.rng[0], c.rng[1])
-			if err != nil {
-				panic(err)
-			}
-
-			for off := 0; off <= c.span; off++ {
-				if len(hh[0][off:]) < len(h[0]) {
-					continue
-				}
-
-				var res [len(h)]float64
-				for k := range hh {
-					res[k] = ber(h[k], hh[k][off:len(h[0])])
-				}
-				rng := [2]int{
-					c.rng[0] + off,
-					c.rng[0] + off + len(h[0]),
-				}
-				bers = append(bers, result{c.song, rng, res})
-			}
-		}
-		sort.Slice(bers, func(i, j int) bool {
-			var s1, s2 float64
-			for k := range bers[i].score {
-				s1 += bers[i].score[k]
-				s2 += bers[j].score[k]
-			}
-			return s1 < s2
-		})
-		if len(bers) > 0 {
-			best := min(bers[0].score[0], bers[0].score[1], bers[0].score[2], bers[0].score[3])
-			if best <= threshold {
-				prevSong := ""
-				for _, r := range bers {
-					if min(r.score[0], r.score[1], r.score[2], r.score[3]) <= threshold {
-						if r.song == prevSong {
-							fmt.Printf("%37s[%6d - %6d]: %.2f\n", "", r.rng[0], r.rng[1], r.score)
-						} else {
-							prevSong = r.song
-							fmt.Printf("%s [%6d - %6d]: %.2f\n", r.song, r.rng[0], r.rng[1], r.score)
-						}
-					} else {
-						break
-					}
-				}
-				return
-			}
-		}
-
-		// found no match, flip one bit and try again
-		if attempt > 0 {
-			for k := range h {
-				for i := range h[k] {
-					h[k][i] ^= 1 << (attempt - 1)
-				}
-			}
-		}
-		for k := range h {
-			for i := range h[k] {
-				h[k][i] ^= 1 << attempt
+				v ^= 1 << attempt
+				q[k] = append(q[k], v)
 			}
 		}
 	}
+
+	printResults(match(db, *verbose, h, q))
 }
 
 const threshold = 0.35
 
-func fetchHashes(db *pgx.Conn, song string, start, end int) ([4][]uint32, error) {
-	rows, err := db.Query(`SELECT hash0, hash1, hash2, hash3 FROM hashes WHERE song = $1 AND off >= $2 AND off <= $3`, song, start, end)
+func fetchHashes(song string) ([4][]uint32, error) {
+	path := "/home/dominikh/prj/src/honnef.co/go/sndprint/_fingerprints/" + song
+	b, err := ioutil.ReadFile(path)
 	if err != nil {
 		return [4][]uint32{}, err
 	}
-	defer rows.Close()
-	var hashes [4][]uint32
-	for k := range hashes {
-		hashes[k] = make([]uint32, 0, end-start)
-	}
-	for rows.Next() {
-		var hash [4]int32
-		if err := rows.Scan(&hash[0], &hash[1], &hash[2], &hash[3]); err != nil {
-			return [4][]uint32{}, err
-		}
-		for i, h := range hash {
-			hashes[i] = append(hashes[i], uint32(h))
-		}
+	var out [4][]uint32
+	for i := 0; i < len(b); i += 4 * 4 {
+		d := b[i : i+4*4]
+		out[0] = append(out[0], binary.LittleEndian.Uint32(d[0:4]))
+		out[1] = append(out[1], binary.LittleEndian.Uint32(d[4:8]))
+		out[2] = append(out[2], binary.LittleEndian.Uint32(d[8:12]))
+		out[3] = append(out[3], binary.LittleEndian.Uint32(d[12:16]))
 	}
 
-	return hashes, nil
+	assert(len(out[0]) == len(out[1]))
+	assert(len(out[2]) == len(out[3]))
+	assert(len(out[0]) == len(out[2]))
+	return out, nil
 }
 
 type candidate struct {
@@ -239,6 +235,16 @@ func fetchCandidates(db *pgx.Conn, h [4][]uint32) ([]candidate, error) {
 	for k := range h {
 		for _, v := range h[k] {
 			args[k] = append(args[k], int32(v))
+		}
+	}
+
+	hash2off := map[int32][][]int{}
+	for k := range h {
+		for i, v := range h[k] {
+			if hash2off[int32(v)] == nil {
+				hash2off[int32(v)] = make([][]int, 4)
+			}
+			hash2off[int32(v)][k] = append(hash2off[int32(v)][k], i)
 		}
 	}
 
@@ -260,15 +266,17 @@ WHERE (hash0 = ANY ($1) OR hash1 = ANY ($2) OR hash2 = ANY ($3) OR hash3 = ANY (
 		}
 
 		// figure out the offsets in the query hash block, so that we can align it.
-		for k := range hashes {
-			for i, hh := range h[k] {
-				if int32(hh) == hashes[k] {
-					start, end := off-i, off+len(h[0])-i-1
-					if start < 0 {
-						continue
-					}
-					candidateScores[candidate{song: song, rng: [2]int{start, end}}]++
+		for k, v := range hashes {
+			offs := hash2off[v]
+			if offs == nil {
+				continue
+			}
+			for _, i := range offs[k] {
+				start, end := off-i, off+len(h[0])-i-1
+				if start < 0 {
+					continue
 				}
+				candidateScores[candidate{song: song, rng: [2]int{start, end}}]++
 			}
 		}
 	}
