@@ -3,11 +3,10 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"os"
 
 	"honnef.co/go/sndprint"
-	"honnef.co/go/sndprint/sndprintdb"
+	"honnef.co/go/sndprint/cmdutil"
 )
 
 func main() {
@@ -15,22 +14,21 @@ func main() {
 	file := flag.String("f", "", "File")
 	flag.Parse()
 	if *uuid == "" || *file == "" {
-		fmt.Fprintln(os.Stderr, "Usage: sndprint-index -u <uuid> -f <file>")
-		os.Exit(2)
+		cmdutil.Usage("Usage: sndprint-index -u <uuid> -f <file>")
 	}
-	db, err := sndprintdb.Open("/home/dominikh/prj/src/honnef.co/go/sndprint/_fingerprints/")
+
+	db, err := cmdutil.DB()
 	if err != nil {
-		panic(err) // XXX
+		cmdutil.Die("Could not open fingerprint database:", err)
 	}
 
 	f, err := os.Open(*file)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Couldn't open file:", err)
-		os.Exit(2)
+		cmdutil.Die("Could not open file:", err)
 	}
 	defer f.Close()
 	h1 := sndprint.Hash(f)
 	if err := db.AddSong(*uuid, h1); err != nil {
-		panic(err) // XXX
+		cmdutil.Die("Could not index file:", err)
 	}
 }

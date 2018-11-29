@@ -7,14 +7,9 @@ import (
 	"os"
 
 	"honnef.co/go/sndprint"
+	"honnef.co/go/sndprint/cmdutil"
 	"honnef.co/go/sndprint/sndprintdb"
 )
-
-func assert(b bool) {
-	if !b {
-		panic("assertion failed")
-	}
-}
 
 func printResults(bers []sndprintdb.Result) {
 	prevSong := ""
@@ -28,23 +23,26 @@ func printResults(bers []sndprintdb.Result) {
 	}
 }
 
+const minSampleLength = 256
+
 func main() {
 	seconds := flag.Int("t", 0, "Max seconds to process")
 	flag.Parse()
 
-	const minSampleLength = 256
-
 	if len(flag.Args()) > 2 {
-		fmt.Fprintln(os.Stderr, "Usage: sndprint-query [file]")
-		os.Exit(2)
+		cmdutil.Usage("Usage: sndprint-query [file]")
+	}
+
+	db, err := cmdutil.DB()
+	if err != nil {
+		cmdutil.Die("Could not open fingerprint database:", err)
 	}
 
 	var r io.Reader = os.Stdin
 	if len(flag.Args()) == 2 {
 		f, err := os.Open(flag.Args()[1])
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Could not open file:", err)
-			os.Exit(2)
+			cmdutil.Die("Could not open file:", err)
 		}
 		defer f.Close()
 		r = f
@@ -55,17 +53,12 @@ func main() {
 
 	h := sndprint.Hash(r)
 	if len(h[0]) < minSampleLength {
-		fmt.Fprintln(os.Stderr, "Sample too short")
-		os.Exit(2)
+		cmdutil.Die("Sample too short")
 	}
 
-	db, err := sndprintdb.Open("/home/dominikh/prj/src/honnef.co/go/sndprint/_fingerprints/")
-	if err != nil {
-		panic(err) // XXX
-	}
 	res, err := db.Match(h)
 	if err != nil {
-		panic(err) // XXX
+		cmdutil.Die("Couldn't search database:", err)
 	}
 	printResults(res)
 }
